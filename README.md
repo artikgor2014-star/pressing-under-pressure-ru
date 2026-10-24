@@ -26,9 +26,16 @@
 | `index.html`, `js/`, `css/`, `images/`, `models/`, `sounds/`, `fonts/` | собранная игра |
 | `source/patch/` | изменённые файлы игры относительно оригинала |
 | `source/build.py`, `source/title_ru.py`, `source/make_icon.py` | скрипты сборки: наложение патча, шрифт, заголовок, иконки |
+| `source/publish.py` | обновление этого репозитория из `build/` |
 | `source/play.bat` | локальный запуск через http-сервер |
 
 Перевод лежит в `source/patch/js/resources/lang.js`: ключ — исходная английская строка.
+
+## Иконка
+
+`source/make_icon.py` рисует щит с зелёной стрелкой и кладёт `favicon.svg`,
+`favicon.ico` (16/32/48), `apple-touch-icon.png`, `icon-512.png`.
+`site.webmanifest` ссылается на те же файлы, `theme-color` — `#0c1e12`.
 
 ## Пересборка
 
