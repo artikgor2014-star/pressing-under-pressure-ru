@@ -1,13 +1,18 @@
 /**
  * @file ingame.class.js
- * @version 1.0.0
+ * @version 1.1.0
  */
 
+import AudioManager from '../framework/audiomanager.class.js';
 import Entity from '../framework/entity.class.js';
 import ModelManager from '../framework/modelmanager.class.js';
 import Scene from '../framework/scene.class.js';
 
 import SimpleBlurMaterial from '../framework/three.js/simpleblurmaterial.class.js';
+
+import UI from '../game/ui.class.js';
+
+import { getLevel } from '../resources/levels.js';
 
 import * as THREE from '../lib/three.js/three.module.js';
 
@@ -18,6 +23,8 @@ export default class Ingame extends Scene {
 
     constructor(context) {
         super(context);
+
+        this._context = context;
 
         let webgl2Available = false;
         try {
@@ -64,7 +71,8 @@ export default class Ingame extends Scene {
 
         this._tScene.updateWorldMatrix(false, true);
 
-        this._reset = true;
+        this._compiled = false;
+        this._pendingLevel = null;
     }
 
     handleResize(context) {
@@ -80,13 +88,19 @@ export default class Ingame extends Scene {
     update(context) {
         super.update(context);
 
-        if (this._reset) {
-            this._reset = false;
+        if (!this._compiled) {
+            this._compiled = true;
 
             context.renderer.compile(this._tScene, this._camera);
             context.renderer.render(this._tScene, this._camera);
+        }
 
-            this.reset(context);
+        if (this._pendingLevel !== null) {
+            const level = this._pendingLevel;
+
+            this._pendingLevel = null;
+
+            this.reset(context, level);
         }
 
         if (this._blurAmount > 0) {
@@ -101,10 +115,41 @@ export default class Ingame extends Scene {
         context.renderer.render(this._tScenePost, this._cameraPost);
     }
 
-    reset(context) {
+    startLevel(levelId) {
+        this.stopLevel();
+
+        this._pendingLevel = getLevel(levelId);
+    }
+
+    stopLevel() {
+        const context = this._context;
+
+        context.time.clearAllTimeouts();
+
+        AudioManager.stop('music');
+        AudioManager.stop('flood');
+        AudioManager.stop('underwater');
+
+        this._button.stop(context);
         this._animations.reset(context);
         this._player.reset(context);
-        this._button.reset(context);
+
+        this.setUnderwater(false);
+        this.setBlurAmount(0.3, 0.3);
+
+        UI.hideHud();
+    }
+
+    reset(context, level) {
+        context.time.clearAllTimeouts();
+
+        AudioManager.stop('music');
+        AudioManager.stop('flood');
+        AudioManager.stop('underwater');
+
+        this._animations.reset(context);
+        this._player.reset(context);
+        this._button.reset(context, level);
 
         this.setUnderwater(false);
 

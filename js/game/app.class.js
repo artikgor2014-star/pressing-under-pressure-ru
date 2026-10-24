@@ -9,6 +9,8 @@ import Time from '../framework/time.class.js';
 
 import Context from './context.class.js';
 
+import UI from './ui.class.js';
+
 import * as THREE from '../lib/three.js/three.module.js';
 
 import Ingame from '../scenes/ingame.class.js';
@@ -70,6 +72,9 @@ export default class App {
         this._context = new Context(this, this._time, this._renderer);
 
         this._scene = new Ingame(this._context);
+
+        UI.init(this._scene);
+        UI.showMenu();
 
         window.addEventListener('resize', this._handleResize.bind(this));
         this._handleResize();

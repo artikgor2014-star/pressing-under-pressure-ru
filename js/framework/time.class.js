@@ -1,6 +1,6 @@
 /**
  * @file time.class.js
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 export default class Time {
@@ -53,5 +53,9 @@ export default class Time {
 
     clearTimeout(timeout) {
         timeout.cleared = true;
+    }
+
+    clearAllTimeouts() {
+        this._timeouts.length = 0;
     }
 }

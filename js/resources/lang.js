@@ -63,6 +63,22 @@ export const STRINGS = {
     'good memory': 'ХОРОШАЯ ПАМЯТЬ',
     'press if you like': 'ЖМИ, ЕСЛИ ЛЮБИШЬ',
     'jumpscares': 'СКРИМЕРЫ',
+
+    // новые задания
+    'press 3 to 5 times': 'НАЖМИ ОТ 3 ДО 5 РАЗ',
+    'press 3 times, but not in a row': 'НАЖМИ 3 РАЗА, НО НЕ ПОДРЯД',
+    'press once after half-time': 'НАЖМИ ОДИН РАЗ ПОСЛЕ ПОЛОВИНЫ',
+    'press twice within 1 second': 'НАЖМИ ДВАЖДЫ ЗА 1 СЕКУНДУ',
+    'press if the number is odd': 'ЖМИ, ЕСЛИ ЧИСЛО НЕЧЁТНОЕ',
+    'press if the first is greater': 'ЖМИ, ЕСЛИ ПЕРВОЕ БОЛЬШЕ',
+    'press when the button turns green': 'ЖМИ, КОГДА КНОПКА СТАНЕТ ЗЕЛЁНОЙ',
+    'do not press, whatever happens': 'НЕ ЖМИ, ЧТО БЫ НИ СЛУЧИЛОСЬ',
+    'press an even number of times': 'НАЖМИ ЧЁТНОЕ ЧИСЛО РАЗ',
+    'press once for each letter': 'НАЖМИ ПО РАЗУ ЗА БУКВУ',
+    'in the word pressure': 'В СЛОВЕ «ДАВЛЕНИЕ»',
+    'press and hold until you see a star': 'ЖМИ И ДЕРЖИ, ПОКА НЕ УВИДИШЬ ЗВЕЗДУ',
+    'press 5 times in 4 seconds': 'НАЖМИ 5 РАЗ ЗА 4 СЕКУНДЫ',
+    'level complete': 'УРОВЕНЬ ПРОЙДЕН',
 };
 
 /** Перевод строки; неизвестные строки возвращаются как есть. */

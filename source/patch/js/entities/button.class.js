@@ -10,7 +10,13 @@ import CanvasPlane from '../framework/three.js/canvasplane.class.js';
 
 import App from '../game/app.class.js';
 
-import { tr, remaining, aboutRemaining, pressTimes } from '../resources/lang.js';
+import UI from '../game/ui.class.js';
+
+import { markLevelComplete } from '../game/storage.js';
+
+import { tr } from '../resources/lang.js';
+import { ENDLESS_POOL, speedBonus } from '../resources/levels.js';
+import { createTask } from '../resources/tasks.js';
 
 import * as THREE from '../lib/three.js/three.module.js';
 
@@ -110,6 +116,7 @@ export default class Button extends Entity {
 
         this._light0.originalColor = this._light0.color.clone();
         this._light1.originalColor = this._light1.color.clone();
+        this._light1.originalDecay = this._light1.decay;
 
         this._canvasPlane = new CanvasPlane(512, 512, 0.66 / 512, 0.66 / 512, -256, -256);
         this._canvasPlane.rotateX(Math.PI / 2);
@@ -130,9 +137,17 @@ export default class Button extends Entity {
         this._presses = null;
         this._pressed = null;
 
-        this._jumpscareDone = false;
-
         this._lightTheme = null;
+
+        this._level = null;
+        this._state = null;
+        this._run = undefined;
+
+        this._endlessPool = [];
+        this._endlessStep = 0;
+        this._endlessId = null;
+
+        this._hudTimer = 0;
     }
 
     update(context) {
@@ -148,6 +163,8 @@ export default class Button extends Entity {
             : 0.35 - this._animations.getButtonHeight() * 0.2;
 
         this._updateTimer(context);
+
+        this._updateHud(context);
 
         if (this._command === null) {
             return;
@@ -214,6 +231,12 @@ export default class Button extends Entity {
             this._lastCommand = command;
             this._command = null;
 
+            if (state) {
+                this._completeCommand(command, context);
+            } else if (this._run !== undefined) {
+                this._run.failedAt = context.time.totalSeconds;
+            }
+
             context.time.setTimeout(() => {
                 if (command.isFinal) {
                     this._win(context);
@@ -228,13 +251,20 @@ export default class Button extends Entity {
         }
     }
 
-    reset(context) {
-        this._createCommands(context);
+    reset(context, level) {
+        this._createCommands(context, level);
+
+        this._mouseHeld = false;
+        this._pressed = false;
+        this._presses = 0;
 
         this._light0.color.copy(this._light0.originalColor);
         this._light1.color.copy(this._light1.originalColor);
 
         this._light1.intensity = 0;
+        this._light1.decay = this._light1.originalDecay;
+        this._light1.position.set(0, 0.5, 0);
+        this._light1.distance = 9;
 
         this._targetLightIntensity = 0;
 
@@ -245,6 +275,21 @@ export default class Button extends Entity {
         context.time.setTimeout(() => {
             this._nextCommand(true);
         }, 2000);
+    }
+
+    stop(context) {
+        this._command = null;
+        this._commands = null;
+        this._run = undefined;
+        this._mouseHeld = false;
+        this._pressed = false;
+
+        this._setLightTheme('off');
+
+        this._clearCanvas();
+
+        this._targetLightIntensity = 0;
+        this._light1.intensity = 0;
     }
 
     _updateTimer(context) {
@@ -300,11 +345,44 @@ export default class Button extends Entity {
         }, 7000);
 
         context.time.setTimeout(() => {
-            this.getScene().reset(context);
-        }, 11500);
+            UI.showResult(this._buildResult(false));
+        }, 7000);
     }
 
     _win(context) {
+        const result = this._buildResult(true);
+
+        if (!result.endless) {
+            markLevelComplete(result.levelId, result.score, result.timeMs);
+        }
+
+        if (this._level.id === 'level3') {
+            this._winFinal(context, result);
+        } else {
+            this._winLevel(context, result);
+        }
+    }
+
+    _winLevel(context, result) {
+        AudioManager.stop('music');
+
+        AudioManager.play('sound__correct');
+
+        this._player.win();
+
+        this._setLightTheme('on');
+
+        this._clearCanvas();
+
+        this._drawText(tr('level complete'), 0, -40);
+        this._drawText(`${result.score}`, 0, 40, 44);
+
+        context.time.setTimeout(() => {
+            UI.showResult(result);
+        }, 3500);
+    }
+
+    _winFinal(context, result) {
         AudioManager.stop('music');
 
         context.time.setTimeout(() => {
@@ -386,6 +464,8 @@ export default class Button extends Entity {
 
         context.time.setTimeout(() => {
             document.querySelector('.the-end').style.visibility = 'visible';
+
+            UI.showResult(result);
         }, 46000);
     }
 
@@ -401,9 +481,25 @@ export default class Button extends Entity {
 
         this._clearCanvas();
 
+        if (this._commands.length === 0) {
+            if (this._level === null || !this._level.endless) {
+                return;
+            }
+
+            this._commands.push(createTask(this._nextEndlessId(), this, this._state));
+        }
+
         this._command = this._commands.shift();
         this._commandDuration = 0;
         this._command.setup();
+
+        if (this._level !== null && this._level.endless) {
+            const scale = Math.max(0.55, 1 - Math.floor(this._endlessStep / 5) * 0.07);
+
+            this._commandDuration *= scale;
+            this._endlessStep++;
+        }
+
         this._commandSeconds = this._commandDuration;
         this._firstCommandUpdate = true;
 
@@ -422,593 +518,132 @@ export default class Button extends Entity {
 
         this._targetLightIntensity = 20 * Button._lightIntensity;
 
-        this._setLightTheme(this._command.getState === undefined ? 'info' : 'on');
+        this._setLightTheme(this._command.initialLightTheme ?? (this._command.getState === undefined ? 'info' : 'on'));
 
         AudioManager.play('sound__switch');
     }
 
-    _createCommands(context) {
-        const defaultDuration = 6;
-
-        const groupOrder = [0, 1, 1, 8, 25, 5, 9, 3, 10, 2, 11, 5, 3, 12, 2, 13, 4, 27, 23, 14, 5, 5,
-            28, 3, 15, 24, 16, 6, 5, 17, 7, 3, 18, 4, 2, 7, 19, 5, 7, 5, 20, 21, 26, 22];
-
-        const cats = 2 + Math.floor(Math.random() * 5);
-        const subtracted = Math.floor(Math.random() * 5);
-        const targetHour = 3 + Math.floor(Math.random() * 6);
-        let pressesRemaining0 = 2 + Math.floor(Math.random() * 5);
-        let pressesRemaining1 = 4 + Math.floor(Math.random() * 8);
-        let pressesRemaining2 = 200;
-        let pressesRemaining3 = 10;
-        let holdingDuration = 0;
-        let timeUntilSpider = null;
-        let isHuman = null;
-        let likeJumpscares = false;
-
-        const groups = [[{ // Group 0
-            setup: () => {
-                this._drawSprite(10, 0, 0, 500, 500); // Title
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (lastSeconds > -4 && seconds <= -4) {
-                    this._drawText(tr('press'), 0, 185, 40);
-                }
-            },
-            getState: (timeout, presses, pressed) => presses === 0 ? null : true,
-        }], [{ // Group 1
-            presses: 1,
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press'));
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses > 0,
-        }, {
-            presses: 0,
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('do not press'));
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses === 0,
-        }], [{ // Group 2
-            setup: () => {
-                this._commandDuration = defaultDuration * 2.5;
-
-                this._drawText(tr('press once for each'), 0, -32, 39);
-                this._drawText(tr('word in this sentence'), 0, 32, 37);
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 8,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press less than 2 times'), 0, 0, 34);
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses < 2,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.5;
-
-                this._drawText(tr('press more than 5 times'), 0, 0, 35);
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses > 5,
-        }], [{ // Group 3
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.2;
-
-                this._drawText(tr('press once per corner'), 0, -36, 38);
-                this._drawSprite(6, 0, 68); // Circle
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 0,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.2;
-
-                this._drawText(tr('press once per corner'), 0, -36, 38);
-                this._drawSprite(5, 0, 68); // Triangle
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 3,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.5;
-
-                this._drawText(tr('press once per corner'), 0, -36, 38);
-                this._drawSprite(4, 0, 68); // Square
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 4,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration * 2.5;
-
-                this._drawText(tr('press once per corner'), 0, -44, 38);
-                this._drawSprite(7, 0, 86); // Star
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 10,
-        }], [{ // Group 4
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press if you\'re a human'), 0, 0, 36);
-            },
-            getState: (timeout, presses, pressed) => {
-                if (presses === 0 && !timeout) {
-                    return null;
-                }
-
-                if (isHuman === null) {
-                    isHuman = presses > 0 ? true : null;
-                    return true;
-                } else {
-                    return isHuman === (presses > 0);
-                }
-            },
-        }, {
-            setup: () => {
-                this._targetPresses = [0, Infinity];
-                this._commandDuration = defaultDuration;
-                this._waitForTimeout = false;
-
-                this._drawText(tr('press if you\'re a robot'), 0, 0, 36);
-            },
-            getState: (timeout, presses, pressed) => {
-                if (presses === 0 && !timeout) {
-                    return null;
-                }
-
-                if (isHuman === null) {
-                    isHuman = presses > 0 ? false : null;
-                    return true;
-                } else {
-                    return isHuman === (presses === 0);
-                }
-            },
-        }], [{ // Group 5
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('double press'));
-            },
-            getState: (timeout, presses, pressed) => presses < 2 && !timeout ? null : presses === 2,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press twice'));
-            },
-            getState: (timeout, presses, pressed) => presses < 2 && !timeout ? null : presses === 2,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.5;
-
-                this._drawText(tr('would you kindly not press'), 0, 0, 32);
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses === 0,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press and hold'));
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : pressed,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration * 2;
-
-                this._drawText(pressTimes(subtracted), 0, 0, 42);
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 6 - subtracted,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration / 2;
-
-                this._drawText(tr('quickly don\'t press!!!'), 0, 0, 40);
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses === 0,
-        }, {
-            setup: () => {
-                this._commandDuration = defaultDuration;
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange) {
-                    this._clearCanvas();
-
-                    this._drawText(remaining(pressesRemaining0 - presses), 0, 0, 40);
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === pressesRemaining0,
-        }], [{ // Group 6
-            setup: () => {
-                this._commandDuration = defaultDuration;
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange) {
-                    this._clearCanvas();
-
-                    this._drawText(remaining(pressesRemaining1 - presses), 0, 0, 40);
-
-                    this._drawSprite(1); // Spider
-                }
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses === 0,
-        }], [{ // Group 7
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.5;
-
-                this._drawText(tr('press and hold'), 0, -32, 43);
-                this._drawText(tr('longer than 2 seconds'), 0, 32, 37);
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressed) {
-                    const last = holdingDuration;
-                    holdingDuration += lastSeconds - seconds;
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout && holdingDuration <= 2 ? null : holdingDuration > 2,
-        }, {
-            setup: () => {
-                this._drawText(tr('press and hold until'), 0, -32, 38);
-                this._drawText(tr('you see a spider'), 0, 32, 40);
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (timeUntilSpider === null) {
-                    if (pressed) {
-                        timeUntilSpider = 15;
-
-                        this._clearCanvas();
-                    }
-                } else {
-                    const last = timeUntilSpider;
-                    timeUntilSpider -= lastSeconds - seconds;
-
-                    if (timeUntilSpider < 10 && last >= 10) {
-                        this._drawText(tr('release'));
-                    }
-
-                    if (timeUntilSpider < 7 && last >= 7) {
-                        this._clearCanvas();
-                    }
-
-                    if (timeUntilSpider < 5 && last >= 5) {
-                        this._drawText(tr('stop!'));
-                    }
-
-                    if (timeUntilSpider < 2 && last >= 2) {
-                        this._clearCanvas();
-                    }
-
-                    if (timeUntilSpider < 0 && last >= 0) {
-                        this._drawSprite(1); // Spider
-                    }
-                }
-            },
-            getState: (timeout, presses, pressed) => timeUntilSpider === null || pressed ? null : timeUntilSpider <= 0,
-        }, {
-            setup: () => {
-                this._commandDuration = 8;
-
-                this._drawText('н____');
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (seconds < 6 && lastSeconds >= 6) {
-                    this._clearCanvas();
-                    this._drawText('н___и');
-                }
-
-                if (seconds < 5 && lastSeconds >= 5) {
-                    this._clearCanvas();
-                    this._drawText('на__и');
-                }
-
-                if (seconds < 4 && lastSeconds >= 4) {
-                    this._clearCanvas();
-                    this._drawText('наж_и');
-                }
-
-                if (seconds < 3 && lastSeconds >= 3) {
-                    this._clearCanvas();
-                    this._drawText('нажми');
-                }
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : this._commandSeconds < 3 && presses > 0,
-        }], [{ // Group 8
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('same as last'));
-
-                this._animations.animateRat('RatWalk');
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null
-                : this._lastCommand.presses > 0 ? presses > 0 : presses === 0,
-        }], [{ // Group 9
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('always press when'), 0, -32, 40);
-                this._drawText(tr('you see a rat'), 0, 32, 40);
-            },
-        }], [{ // Group 10
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('do not press'));
-                this._drawSprite(0, 0, 64, 160, 160); // Rat
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses > 0,
-        }], [{ // Group 11
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('press when cats are even'), 0, 0, 33);
-            },
-        }], [{ // Group 12
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.2;
-
-                for (let i = 0; i < cats; i++) {
-                    this._drawSprite(2, -cats * 32 + i * 64 + 32, 0, 80, 80); // Cat
-                }
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : cats % 2 === 0 ? presses > 0 : presses === 0,
-        }], [{ // Group 13
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('never press when'), 0, -32, 43);
-                this._drawText(tr('when you see a spider'), 0, 32, 43);
-            },
-        }], [{ // Group 14
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.5;
-
-                this._drawText(tr('press once per cat earlier'), 0, 0, 32);
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === cats,
-        }], [{ // Group 15
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('the next statement is a lie'), 0, 0, 32);
-            },
-        }], [{ // Group 16
-            setup: () => {
-                this._commandDuration = defaultDuration * 2;
-
-                this._drawText(tr('do press'));
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : presses === 1,
-        }], [{ // Group 17
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press to pay respect'), 0, 0, 41);
-            },
-            getState: (timeout, presses, pressed) => presses === 0 && !timeout ? null : true,
-        }], [{ // Group 18
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.25;
-                this._drawText(tr('do not press'));
-
-                this._animations.animateRat('RatStandButton', true);
-            },
-            getState: (timeout, presses, pressed) => {
-                const state = presses === 0 && !timeout ? null : presses === 1;
-                if (state) {
-                    this._animations.animateRat('RatLeaveButton');
-                }
-                return state;
-            },
-        }], [{ // Group 19
-            setup: () => {
-                this._commandDuration = defaultDuration * 3;
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange || seconds < 1 && lastSeconds >= 1) {
-                    this._clearCanvas();
-
-                    if (presses === 200) {
-                        this._drawText(tr('are you a wizard'), 0, 0, 40);
-                    } else if (seconds < 1) {
-                        this._drawText(tr('close enough'));
-                    } else {
-                        this._drawText(aboutRemaining(pressesRemaining2 - presses), 0, 0, 30);
-                    }
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : true,
-            disableFlash: true,
-        }], [{ // Group 20
-            setup: () => {
-                this._commandDuration = 20;
-
-                this._drawText(tr('press after half-time'), 0, 0, 38);
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (seconds < 13 && lastSeconds >= 13) {
-                    this._animations.spiderScare();
-                    this._player.spiderScare();
-                }
-                if (seconds < 12 && lastSeconds >= 12) {
-                    this.getScene().setBlurAmount(0.03, 0.02);
-                }
-                if (seconds < 12 && lastSeconds >= 12) {
-                    AudioManager.play('sound__spider');
-                }
-                if (seconds < 8 && lastSeconds >= 8) {
-                    this._animations.hideSpider();
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses === 0,
-        }], [{ // Group 21
-            setup: () => {
-                this._commandDuration = defaultDuration * 4;
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (Math.floor(seconds * 4) !== Math.floor(lastSeconds * 4)) {
-                    this._clearCanvas();
-
-                    this._drawText(tr('press more than'), 0, -128, 38);
-                    this._drawText(tr('once per corner'), 0, -74, 38);
-
-                    let firstX = null;
-                    let firstY = null;
-                    let lastX = null;
-                    let lastY = null;
-
-                    for (let i = 0; i < 10; i++) {
-                        const a = Math.random() * Math.PI * 2;
-                        const r = 120 + Math.random();
-
-                        const x = Math.cos(a) * r;
-                        const y = 80 + Math.sin(a) * r;
-                        if (i === 0) {
-                            firstX = x;
-                            firstY = y;
-                            lastX = x;
-                            lastY = y;
-                        } else {
-                            this._drawLine(x, y, lastX, lastY, 5);
-                            lastX = x;
-                            lastY = y;
-                        }
-
-                        if (i === 9) {
-                            this._drawLine(x, y, firstX, firstY, 5);
-                        }
-                    }
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : presses >= 16,
-            disableFlash: true,
-        }], [{ // Group 22
-            setup: () => {
-                this._drawText(tr('press to ascend'));
-            },
-            getState: (timeout, presses, pressed) => presses === 0 ? null : true,
-            isFinal: true,
-        }], [{ // Group 23
-            setup: () => {
-                this._commandDuration = defaultDuration * 1.75;
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange) {
-                    this._clearCanvas();
-
-                    this._drawText(tr('what time is it?'), 0, 40, 30);
-
-                    this._drawCircle(0, 0, 228, 5, 8);
-
-                    for (let i = 0; i < 12; i++) {
-                        const a = i / 12 * Math.PI * 2;
-                        const x = Math.sin(a) * 180;
-                        const y = -Math.cos(a) * 180;
-
-                        this._drawSprite(targetHour === i ? 9 : 3, x, y, 96, 96); // Skull or smile
-
-                        if (presses % 12 === i) {
-                            this._drawLine(0, 0, x * 0.8, y * 0.8, 8);
-                        }
-                    }
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : (presses % 12) === targetHour,
-        }], [{ // Group 24
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('the next command is wrong'), 0, 0, 32);
-            },
-        }], [{ // Group 25
-            setup: () => {
-                this._commandDuration = defaultDuration * 0.75;
-
-                this._drawText(tr('remember this number'), 0, -32, 37);
-                this._drawText(Math.floor(Math.random() * 100).toString(), 0, 32, 50);
-            },
-        }], [{ // Group 26
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press if you'), 0, -32, 40);
-                this._drawText(tr('remember the number'), 0, 32, 39);
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange && presses > 0) {
-                    this._clearCanvas();
-
-                    this._drawText(tr('good memory'), 0, 0, 40);
-
-                    this._commandSeconds = Math.min(this._commandSeconds, 2);
-                }
-            },
-            getState: (timeout, presses, pressed) => !timeout ? null : true,
-        }], [{ // Group 27
-            setup: () => {
-                this._commandDuration = defaultDuration;
-
-                this._drawText(tr('press if you like'), 0, -32, 40);
-                this._drawText(tr('jumpscares'), 0, 32, 45);
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange && presses > 0) {
-                    likeJumpscares = true;
-                }
-            },
-            getState: (timeout, presses, pressed) => {
-                if (presses > 0 || timeout) {
-                    likeJumpscares = presses > 0;
-                    if (!this._jumpscareDone && presses > 0) {
-                        AudioManager.stop('music');
-                    }
-                    return true;
-                }
-                return null;
-            },
-            getDelay: () => {
-                return likeJumpscares && !this._jumpscareDone ? 8000 : 2000;
-            },
-        }], [{ // Group 28
-            setup: () => {
-                this._commandDuration = defaultDuration * 2;
-            },
-            update: (lastSeconds, seconds, presses, pressed, pressChange) => {
-                if (pressChange) {
-                    this._clearCanvas();
-
-                    this._drawText(remaining(pressesRemaining3 - presses), 0, 0, 39);
-                }
-            },
-            getState: (timeout, presses, pressed) => {
-                if (likeJumpscares && presses > 7) {
-                    this._animations.jumpscare();
-                    this.getScene().setBlurAmount(0.05, 0.5);
-                    this._jumpscareDone = true;
-
-                    return true;
-                }
-
-                return !timeout ? null : presses === pressesRemaining3;
-            },
-            getDelay: () => {
-                return likeJumpscares ? 5000 : 2000;
-            },
-        }]];
-
-        const shuffled = groups.map(group => {
-            const a = [];
-
-            while (group.length > 0) {
-                a.push(group.splice(Math.floor(Math.random() * group.length), 1)[0]);
+    _nextEndlessId() {
+        if (this._endlessPool.length === 0) {
+            this._endlessPool = ENDLESS_POOL.slice();
+
+            for (let i = this._endlessPool.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [this._endlessPool[i], this._endlessPool[j]] = [this._endlessPool[j], this._endlessPool[i]];
             }
 
-            return a;
-        });
+            if (this._endlessId !== null && this._endlessPool[this._endlessPool.length - 1] === this._endlessId
+                && this._endlessPool.length > 1) {
+                const swap = this._endlessPool.length - 2;
+                [this._endlessPool[swap], this._endlessPool[this._endlessPool.length - 1]] =
+                    [this._endlessPool[this._endlessPool.length - 1], this._endlessPool[swap]];
+            }
+        }
 
-        const groupIndex = shuffled.map(() => 0);
+        this._endlessId = this._endlessPool.pop();
 
-        this._commands = groupOrder.map(group => shuffled[group][groupIndex[group]++]);
+        return this._endlessId;
     }
+
+    _createCommands(context, level) {
+        this._level = level;
+        this._context = context;
+
+        this._state = {
+            cats: 2 + Math.floor(Math.random() * 5),
+            subtracted: Math.floor(Math.random() * 5),
+            isHuman: null,
+            likeJumpscares: false,
+            jumpscareDone: false,
+        };
+
+        this._commands = [];
+
+        if (level.intro !== undefined) {
+            this._commands.push(createTask(level.intro, this, this._state));
+        }
+
+        level.tasks.forEach(id => this._commands.push(createTask(id, this, this._state)));
+
+        this._endlessPool = [];
+        this._endlessStep = 0;
+        this._endlessId = null;
+
+        if (level.endless) {
+            this._commands.push(createTask(this._nextEndlessId(), this, this._state));
+        }
+
+        this._run = {
+            level,
+            startedAt: context.time.totalSeconds,
+            completed: 0,
+            score: 0,
+            finishedAt: null,
+            failedAt: null,
+            total: level.endless ? null : level.tasks.length,
+        };
+
+        this._hudTimer = 0;
+    }
+
+    _completeCommand(command, context) {
+        if (command.counts === false || this._run === undefined) {
+            return;
+        }
+
+        this._run.completed++;
+        this._run.score += command.points || 0;
+
+        if (command.isFinal) {
+            this._run.finishedAt = context.time.totalSeconds;
+        }
+    }
+
+    _buildResult(success) {
+        const end = success ? this._run.finishedAt : this._run.failedAt;
+        const elapsed = Math.max(0, (end ?? this._context.time.totalSeconds) - this._run.startedAt);
+        const timeMs = Math.round(elapsed * 1000);
+        const bonus = success && !this._level.endless ? speedBonus(this._level, timeMs) : 0;
+
+        return {
+            levelId: this._level.id,
+            levelTitle: this._level.title,
+            success,
+            endless: !!this._level.endless,
+            score: this._run.score + bonus,
+            timeMs,
+            tasks: this._run.completed,
+            total: this._run.total,
+        };
+    }
+
+    _updateHud(context) {
+        if (this._run === undefined || this._run.finishedAt !== null || this._run.failedAt !== null) {
+            return;
+        }
+
+        this._hudTimer += context.time.elapsedSeconds;
+
+        if (this._hudTimer < 0.1) {
+            return;
+        }
+
+        this._hudTimer = 0;
+
+        const elapsed = Math.max(0, context.time.totalSeconds - this._run.startedAt);
+        const pending = this._command !== null && this._command.counts !== false ? 1 : 0;
+        const taskNumber = this._level.endless ? this._run.completed + 1 : this._run.completed + pending;
+        const liveBonus = this._level.endless ? 0 : speedBonus(this._level, elapsed * 1000);
+
+        UI.updateHud({
+            levelTitle: this._level.title,
+            taskNumber,
+            taskTotal: this._run.total,
+            elapsedSeconds: elapsed,
+            score: this._run.score + liveBonus,
+        });
+    }
+
 
     _clearCanvas() {
         const ctx = this._canvasPlane.getContext2D();
