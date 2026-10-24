@@ -51,6 +51,15 @@ def build_title(font_path):
     title_ru.build(str(BUILD / "images" / "sprites.png"), str(font_path))
 
 
+def check_hosting():
+    """itch.io-скрипт htmlgame.js уводит вкладку на свою заглушку при любом
+    хостинге, кроме itch.io, — в сборке его быть не должно."""
+    for page in BUILD.rglob("*.html"):
+        text = page.read_text(encoding="utf-8", errors="replace")
+        if "static.itch.io" in text:
+            raise SystemExit(f"в {page.relative_to(BUILD)} остался static.itch.io")
+
+
 def build_zip():
     if ZIP.exists():
         ZIP.unlink()
@@ -69,6 +78,7 @@ def main():
     if stale.exists():
         stale.unlink()
     shutil.copy2(ROOT / "tools" / "play.bat", BUILD / "ИГРАТЬ.bat")
+    check_hosting()
     build_zip()
     print(f"готово: {BUILD}")
     print(f"архив:  {ZIP} ({ZIP.stat().st_size / 1048576:.1f} МБ)")
