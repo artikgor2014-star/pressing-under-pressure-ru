@@ -3,8 +3,8 @@
 Оригинальная плитка — белая маска: надпись PRESSING на прозрачном фоне и щит,
 в котором вырезаны полупрозрачные слова UNDER / PRESSURE. Скрипт стирает
 английский текст и вписывает русский тем же приёмом: «ЖМИ» — белым поверх
-фона, «ПОД ДАВЛЕНИЕМ» — вырезом в щите, с той же плотностью, разрядкой
-и свечением.
+фона, «ПОД ДАВЛЕНИЕМ» — вырезом в щите. Стрелка, паз и «подтёки» на верхней
+кромке остаются оригинальными.
 """
 
 import numpy as np
@@ -15,13 +15,16 @@ from scipy import ndimage
 
 TILE = (1024, 1024)
 ERASE_BAND = (0, 74, 511, 168)   # где была надпись PRESSING (с её свечением)
-WORDS_BOX = (30, 212, 481, 316)  # прямоугольник с UNDER / PRESSURE
-LINE1 = {"text": "ПОД", "center": (258, 242), "width": 271, "height": 33}
-LINE2 = {"text": "ДАВЛЕНИЕМ", "center": (257, 288), "width": 383, "height": 33}
+SHIELD_BOX = (0, 168, 512, 470)  # где лежит сам щит
+WORDS_BAND = (214, 318)          # UNDER / PRESSURE вместе с тенями
+NOTCH_X0, NOTCH_X1, NOTCH_TOP = 178, 335, 418   # паз внизу щита
+
+LINE1 = {"text": "ПОД", "center": (257, 243), "width": 400, "height": 34}
+LINE2 = {"text": "ДАВЛЕНИЕМ", "center": (257, 289), "width": 420, "height": 34}
 TOP = {"text": "ЖМИ", "center": (256, 132), "width": 353, "height": 52}
-SKEW = 0                         # буквы в оригинале не наклонены — это рисунок шрифта
+
+WEIGHT = 800                     # подобран по IoU с оригинальной надписью
 CUT_ALPHA = 0.9                  # плотность вырезанных букв (оригинал ≈ 0.89)
-WEIGHT = 800                   # подобран по IoU с оригинальной надписью
 
 
 def _font(path, weight, size):
@@ -33,24 +36,18 @@ def _font(path, weight, size):
     return ImageFont.truetype(path, size)
 
 
-def _render(text, font, skew=SKEW):
+def _render(text, font):
     """Рисует текст и возвращает обрезанную маску."""
-    canvas = Image.new("L", (font.size * len(text) + 200, font.size * 3), 0)
+    canvas = Image.new("L", (font.size * len(text) * 2 + 200, font.size * 3), 0)
     ImageDraw.Draw(canvas).text((100, font.size), text, font=font, fill=255)
     box = canvas.getbbox()
     if box is None:
         raise ValueError(f"пустая маска для {text!r}")
-    canvas = canvas.crop(box)
-    if skew:
-        canvas = canvas.transform(
-            (canvas.width + int(canvas.height * abs(skew)), canvas.height),
-            Image.AFFINE, (1, skew, 0, 0, 1, 0), Image.BICUBIC,
-        )
-    return canvas
+    return canvas.crop(box)
 
 
 def _fit(spec, path):
-    """Подбирает кегль под высоту оригинала; ширину не растягивает."""
+    """Подбирает кегль так, чтобы маска попала в высоту и ширину оригинала."""
     text, height, width = spec["text"], spec["height"], spec["width"]
     size = max(8, int(height * 1.8))
 
@@ -90,6 +87,33 @@ def _blit(target, mask, center, mode, glow=False):
     target.paste(Image.fromarray(region.clip(0, 255).astype("uint8")), (x, y))
 
 
+def _shield_body(alpha):
+    """Силуэт щита по крайним пикселям строки, без паза внизу."""
+    solid = np.array(alpha) > 140
+
+    filled = np.zeros_like(solid)
+    for y in range(SHIELD_BOX[1], SHIELD_BOX[3]):
+        cols = np.where(solid[y])[0]
+        if len(cols):
+            filled[y, cols.min():cols.max() + 1] = True
+
+    filled[: SHIELD_BOX[1]] = False
+    filled[SHIELD_BOX[3]:] = False
+
+    notch = np.zeros_like(filled)
+    notch[NOTCH_TOP:, NOTCH_X0:NOTCH_X1 + 1] = True
+    return filled & ~notch
+
+
+def _clean_words(alpha):
+    """Заливает английские слова и их тени, не трогая стрелку и паз."""
+    a = np.array(alpha).astype(np.int16)
+    band = np.zeros(a.shape, bool)
+    band[WORDS_BAND[0]:WORDS_BAND[1], :] = True
+    a[_shield_body(alpha) & band] = 255
+    return Image.fromarray(a.clip(0, 255).astype("uint8"))
+
+
 def build(sprites_path, font_path):
     image = Image.open(sprites_path).convert("RGBA")
     tile = image.crop((TILE[0], TILE[1], TILE[0] + 512, TILE[1] + 512))
@@ -100,10 +124,8 @@ def build(sprites_path, font_path):
     ImageDraw.Draw(erase).rectangle(ERASE_BAND, fill=255)
     alpha = Image.composite(Image.new("L", (512, 512), 0), alpha, erase)
 
-    # 2. залить вырезанные английские слова
-    fill = Image.new("L", (512, 512), 0)
-    ImageDraw.Draw(fill).rectangle(WORDS_BOX, fill=255)
-    alpha = Image.composite(Image.new("L", (512, 512), 255), alpha, fill)
+    # 2. залить английские слова и их тени; стрелка, паз и подтёки остаются
+    alpha = _clean_words(alpha)
 
     # 3. вписать русский заголовок
     _blit(alpha, _fit(TOP, font_path), TOP["center"], "white", glow=True)
