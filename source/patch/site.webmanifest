@@ -1,0 +1,14 @@
+{
+  "name": "Pressing Under Pressure — на русском",
+  "short_name": "PUP RU",
+  "description": "Неофициальный русский перевод игры Pressing Under Pressure.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#0c1e12",
+  "icons": [
+    { "src": "images/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "images/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "images/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}
