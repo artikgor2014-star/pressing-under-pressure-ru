@@ -68,7 +68,7 @@ export const STRINGS = {
     'press 3 to 5 times': 'НАЖМИ ОТ 3 ДО 5 РАЗ',
     'press 3 times, but not in a row': 'НАЖМИ 3 РАЗА, НО НЕ ПОДРЯД',
     'press once after half-time': 'НАЖМИ ОДИН РАЗ ПОСЛЕ ПОЛОВИНЫ',
-    'press twice within 1 second': 'НАЖМИ ДВАЖДЫ ЗА 1 СЕКУНДУ',
+    'press twice within 4 seconds': 'НАЖМИ ДВАЖДЫ ЗА 4 СЕКУНДЫ',
     'press if the number is odd': 'ЖМИ, ЕСЛИ ЧИСЛО НЕЧЁТНОЕ',
     'press if the first is greater': 'ЖМИ, ЕСЛИ ПЕРВОЕ БОЛЬШЕ',
     'press when the button turns green': 'ЖМИ, КОГДА КНОПКА СТАНЕТ ЗЕЛЁНОЙ',

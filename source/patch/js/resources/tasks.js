@@ -928,7 +928,7 @@ export const TASKS = {
 
                 button._commandDuration = 8;
 
-                button._drawText(tr('press twice within 1 second'), 0, 0, 34);
+                button._drawText(tr('press twice within 4 seconds'), 0, 0, 34);
             },
             update(lastSeconds, seconds, presses) {
                 while (times.length < presses) {
@@ -936,7 +936,7 @@ export const TASKS = {
                 }
             },
             getState: (timeout, presses) => !timeout ? null
-                : presses === 2 && times.length === 2 && times[1] - times[0] <= 1,
+                : presses === 2 && times.length === 2 && times[1] - times[0] <= 4,
         };
     },
 
