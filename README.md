@@ -33,8 +33,9 @@
 
 ## Иконка
 
-`source/make_icon.py` рисует щит с зелёной стрелкой и кладёт `favicon.svg`,
-`favicon.ico` (16/32/48), `apple-touch-icon.png`, `icon-512.png`.
+`source/make_icon.py` рисует смешную картошку под зелёной кнопкой и кладёт
+`favicon.svg`, `favicon.ico` (16/32/48), `apple-touch-icon.png`, `icon-512.png`.
+Для 16 и 32 px используется упрощённый кадр — крупные глаза и рот, без мелочей.
 `site.webmanifest` ссылается на те же файлы, `theme-color` — `#0c1e12`.
 
 ## Пересборка
